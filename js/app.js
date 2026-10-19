@@ -1,7 +1,7 @@
 /* ICON GYM — main app */
 (function () {
   'use strict';
-  const APP_VERSION = '1.1.0';
+  const APP_VERSION = '1.2.0';
   const { PROGRAM_VERSION, GROUPS, LIBRARY, defaultDays } = window.GymProgram;
   const DAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
   const DAY_SHORT = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
@@ -86,26 +86,44 @@
   }
 
   let sheetStack = [];
+  let popSkip = 0, historyQueue = [];
+  const whenHistoryIdle = (fn) => (popSkip ? historyQueue.push(fn) : fn());
+  window.addEventListener('popstate', () => {
+    if (popSkip) { popSkip--; if (!popSkip) { const q = historyQueue; historyQueue = []; q.forEach((fn) => fn()); } return; }
+    const top = sheetStack[sheetStack.length - 1];
+    if (top) top.close(true);
+  });
   function openSheet(html, onMount, opts = {}) {
     const wrap = document.createElement('div');
     wrap.className = 'sheet-wrap';
     wrap.innerHTML = `<div class="sheet-bg"></div><div class="sheet ${opts.tall ? 'tall' : ''}" role="dialog"><div class="sheet-grab"></div><button class="sheet-x" data-close aria-label="סגור">✕</button><div class="sheet-body">${html}</div></div>`;
     document.body.appendChild(wrap);
     document.body.classList.add('noscroll');
-    const close = () => {
+    let closed = false;
+    const openedAt = Date.now();
+    const close = (fromHistory) => {
+      if (closed) return; closed = true;
+      if (!fromHistory && api.pushed) { popSkip++; history.back(); }
       wrap.classList.remove('in');
       setTimeout(() => { wrap.remove(); if (!$('.sheet-wrap')) document.body.classList.remove('noscroll'); }, 280);
       sheetStack = sheetStack.filter((x) => x !== api);
       if (opts.onClose) opts.onClose();
     };
     const api = { el: wrap, body: $('.sheet-body', wrap), close };
-    wrap.addEventListener('click', (e) => { if (e.target.classList.contains('sheet-bg') || e.target.closest('[data-close]')) close(); });
+    wrap.addEventListener('click', (e) => {
+      const link = e.target.closest('a[href^="#"][data-close]');
+      if (link) { e.preventDefault(); close(); go(link.getAttribute('href').replace(/^#\/?/, '')); return; }
+      // ignore a backdrop tap that is really the second half of the tap that opened the sheet
+      if (e.target.classList.contains('sheet-bg') ? Date.now() - openedAt > 400 : e.target.closest('[data-close]')) close();
+    });
     // swipe down to close
     const sh = $('.sheet', wrap); let y0 = null, dy = 0;
     $('.sheet-grab', wrap).addEventListener('touchstart', (e) => { y0 = e.touches[0].clientY; }, { passive: true });
     wrap.addEventListener('touchmove', (e) => { if (y0 == null) return; dy = Math.max(0, e.touches[0].clientY - y0); sh.style.transform = `translateY(${dy}px)`; }, { passive: true });
     wrap.addEventListener('touchend', () => { if (y0 == null) return; sh.style.transform = ''; if (dy > 90) close(); y0 = null; dy = 0; });
     sheetStack.push(api);
+    // a history entry per sheet, so the Android back button closes the sheet instead of leaving the screen
+    whenHistoryIdle(() => { if (!closed) { history.pushState({ sheet: true }, ''); api.pushed = true; } });
     requestAnimationFrame(() => wrap.classList.add('in'));
     if (onMount) onMount(api);
     fixBidi(wrap);
@@ -169,7 +187,7 @@
     const [a, b, c] = h.split('/');
     return { a: a || 'home', b, c };
   }
-  function go(path) { location.hash = '#/' + path; }
+  function go(path) { whenHistoryIdle(() => { location.hash = '#/' + path; }); }
 
   function render() {
     const r = route();
@@ -192,7 +210,7 @@
     renderActiveChip();
   }
 
-  window.addEventListener('hashchange', () => { sheetStack.slice().forEach((sh) => sh.close()); editMode = false; render(); window.scrollTo(0, 0); });
+  window.addEventListener('hashchange', () => { sheetStack.slice().forEach((sh) => sh.close(true)); editMode = false; render(); window.scrollTo(0, 0); });
 
   // ---------------- HOME ----------------
   function greeting() {
@@ -235,7 +253,7 @@
     </header>
 
     ${programUpdate ? `<div class="banner"><div><b>עדכון לתוכנית האימונים זמין</b><div class="muted small">ההיסטוריה והמשקלים שלך נשמרים</div></div><div class="row gap"><button class="btn sm primary" data-act="program-update">עדכן</button><button class="btn sm ghost" data-act="program-skip">לא עכשיו</button></div></div>` : ''}
-    ${!standalone && !localStorage.getItem('icongym.installHint') ? `<div class="banner soft"><div><b>התקן כאפליקציה 📲</b><div class="muted small">${isIOS() ? 'בספארי: כפתור השיתוף ← "הוסף למסך הבית"' : 'הוסף למסך הבית לחוויה מלאה וללא דפדפן'}</div></div><div class="row gap">${deferredInstall ? '<button class="btn sm primary" data-act="install">התקן</button>' : ''}<button class="btn sm ghost" data-act="hide-install">הבנתי</button></div></div>` : ''}
+    ${!standalone && !localStorage.getItem('icongym.installHint') ? `<div class="banner soft"><div><b>התקן כאפליקציה 📲</b><div class="muted small">${isIOS() ? 'בספארי: כפתור השיתוף ← "הוסף למסך הבית"' : 'בכרום: תפריט ⋮ ← "התקנת אפליקציה"'}</div></div><div class="row gap">${deferredInstall ? '<button class="btn sm primary" data-act="install">התקן</button>' : ''}<button class="btn sm ghost" data-act="hide-install">הבנתי</button></div></div>` : ''}
 
     ${act ? (() => { const d = dayOf(act.dow); return `<a class="today-card c-${d.color} live" href="#/day/${d.dow}">
         <div class="tc-top"><span class="pill live-pill"><i></i> אימון פעיל</span><span class="tc-time" data-elapsed>${fmtDur(Date.now() - act.start)}</span></div>
@@ -541,7 +559,8 @@
       <div class="ex-tags big"><span class="t">${ex.sets} סטים</span><span class="t">${esc(ex.reps)} ${ex.kind === 'reps' ? 'חזרות' : unitLabel(ex)}</span>${ex.weight ? `<span class="t">${esc(ex.weight)} ${esc(ex.unit)}</span>` : ''}${ex.rest ? `<span class="t">${I.timer} ${ex.rest} שנ׳ מנוחה</span>` : ''}</div>
       ${ex.note ? `<div class="day-note">${I.info}<span>${esc(ex.note)}</span></div>` : ''}
       <h4>שרירים עובדים</h4>${window.GymMedia.muscleMap(window.GymMedia.musclesOf(ex))}
-      ${(lib.tips || ex.tips || []).length ? `<h4>דגשים לביצוע</h4><ul class="tips" ${lib.tips ? '' : 'dir="ltr"'}>${(lib.tips || ex.tips).map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
+      ${lib.tips ? `<h4>דגשים לביצוע</h4><ul class="tips">${lib.tips.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>`
+        : (ex.tips || []).length ? `<h4>הוראות ביצוע</h4><ol class="steps">${ex.tips.map((t) => `<li dir="auto">${esc(t)}</li>`).join('')}</ol>` : ''}
       <h4>ההתקדמות שלך</h4>
       ${pts.length > 1 ? lineChart(pts, { unit: unitLabel(ex) }) : ''}
       ${ss.length ? `<div class="hist-mini">${ss.map(({ h, it }) => `<div class="hm"><span>${fmtShort(h.date)}</span><span>${it.sets.map((s) => ex.kind === 'reps' ? `${s.w || 0}×${s.r}` : s.r).join(' · ')}</span></div>`).join('')}</div>` : '<p class="muted small">עוד אין רישומים לתרגיל הזה. אחרי האימון הראשון תראה כאן את ההתקדמות.</p>'}
@@ -551,13 +570,15 @@
 
   function exEdit(id, isNew) {
     const { day, ex } = findEx(id); if (!ex) return;
-    const animOpts = (String(ex.anim).startsWith('db:') ? `<option value="${esc(ex.anim)}" selected>מהמאגר: ${esc(ex.anim.slice(3).replace(/_/g, ' '))}</option>` : '')
+    const dbId = ex.dbId || (String(ex.anim).startsWith('db:') ? ex.anim.slice(3) : '');
+    const animOpts = `<option value="" ${ex.anim ? '' : 'selected'}>ללא תמונה</option>`
+      + (dbId ? `<option value="db:${esc(dbId)}" ${ex.anim === 'db:' + dbId ? 'selected' : ''}>התמונה המקורית של התרגיל</option>` : '')
       + window.GymMedia.keys.map((k) => { const l = Object.values(LIBRARY).find((x) => x.anim === k); return `<option value="${k}" ${k === ex.anim ? 'selected' : ''}>${esc(l ? l.name : k)}</option>`; }).join('');
     const rests = [0, 30, 45, 60, 75, 90, 120, 150, 180, 240];
     openSheet(`<form class="form" autocomplete="off">
       <h2>${isNew ? 'תרגיל חדש' : 'עריכת תרגיל'}</h2>
       <div class="edit-preview" data-anim="${esc(ex.anim)}" data-size="full"></div>
-      <label>שם התרגיל<input name="name" value="${esc(ex.name)}" required></label>
+      <label>שם התרגיל<input name="name" dir="auto" value="${esc(ex.name)}" required></label>
       <div class="grid2">
         <label>קבוצת שריר<select name="group">${GROUPS.map((g) => `<option ${g === ex.group ? 'selected' : ''}>${g}</option>`).join('')}</select></label>
         <label>סוג מעקב<select name="kind"><option value="reps" ${ex.kind === 'reps' ? 'selected' : ''}>משקל × חזרות</option><option value="time" ${ex.kind === 'time' ? 'selected' : ''}>זמן (שניות)</option><option value="cardio" ${ex.kind === 'cardio' ? 'selected' : ''}>אירובי (דקות)</option></select></label>
@@ -581,7 +602,6 @@
       $$('[data-step]', api.el).forEach((b) => b.onclick = () => { f.sets.value = Math.max(1, Math.min(10, (+f.sets.value || 0) + +b.dataset.step)); });
       f.onsubmit = (e) => {
         e.preventDefault();
-        if (f.anim.value !== ex.anim && !String(f.anim.value).startsWith('db:')) { delete ex.muscles; delete ex.tips; }
         Object.assign(ex, { name: f.name.value.trim() || ex.name, group: f.group.value, kind: f.kind.value, anim: f.anim.value, sets: Math.max(1, +f.sets.value || 1), reps: f.reps.value.trim(), rest: +f.rest.value, weight: f.weight.value.trim(), unit: f.unit.value.trim(), note: f.note.value.trim() });
         if (S.active && S.active.dow === day.dow) { const l = ensureLog(ex); while (l.length < ex.sets) l.push({ w: '', r: '', done: false }); while (l.length > ex.sets && !l[l.length - 1].done) l.pop(); }
         save(); api.close(); render(); toast('נשמר ✓');
@@ -600,17 +620,21 @@
     save(); render();
   }
 
-  // ---------------- online exercise database (free-exercise-db, 800+ exercises) ----------------
-  const DB_URL = 'https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/dist/exercises.json';
-  let dbPromise = null;
+  // ---------------- full exercise database (free-exercise-db, 870+ exercises, translated to Hebrew) ----------------
+  // data/exdb.json ships with the app (works offline); only the demo photos load from the network.
+  // row: { id, he, en, cat, eq, lv, mech, pm, sm, steps, img }
+  const DB_URL = 'data/exdb.json';
   const CAT_ORDER = { strength: 0, powerlifting: 1, 'olympic weightlifting': 2, strongman: 3, plyometrics: 4, cardio: 5, stretching: 6 };
+  let dbPromise = null;
   const loadDb = () => (dbPromise = dbPromise || fetch(DB_URL).then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
-    .then((db) => db.sort((a, b) => (CAT_ORDER[a.category] ?? 9) - (CAT_ORDER[b.category] ?? 9) || a.name.localeCompare(b.name)))
+    .then((db) => db.filter((e) => window.GymMedia.SAFE_ID.test(e.id)).sort((a, b) => (CAT_ORDER[a.cat] ?? 9) - (CAT_ORDER[b.cat] ?? 9) || a.he.localeCompare(b.he, 'he')))
     .catch((e) => { dbPromise = null; throw e; }));
   const DB_GROUP = { chest: 'חזה', lats: 'גב', 'middle back': 'גב', 'lower back': 'גב', traps: 'גב', shoulders: 'כתפיים', neck: 'כתפיים', biceps: 'יד קדמית', forearms: 'יד קדמית', triceps: 'יד אחורית', quadriceps: 'רגליים', hamstrings: 'רגליים', glutes: 'רגליים', calves: 'רגליים', adductors: 'רגליים', abductors: 'רגליים', abdominals: 'בטן' };
   const EQUIP_HE = { barbell: 'מוט', dumbbell: 'דאמבלים', cable: 'כבל', machine: 'מכונה', 'body only': 'משקל גוף', 'e-z curl bar': 'מוט W', kettlebells: 'קטלבל', bands: 'גומיות', 'exercise ball': 'כדור פיזיו', 'medicine ball': 'כדור כוח', 'foam roll': 'גליל', other: 'אחר' };
   const LEVEL_HE = { beginner: 'מתחיל', intermediate: 'בינוני', expert: 'מתקדם' };
-  const dbGroup = (e) => (e.category === 'cardio' ? 'אירובי' : DB_GROUP[(e.primaryMuscles || [])[0]] || 'חזה');
+  const dbGroup = (e) => (e.cat === 'cardio' ? 'אירובי' : DB_GROUP[(e.pm || [])[0]] || 'חזה');
+  const dbEquip = (e) => EQUIP_HE[e.eq] || 'ללא ציוד';
+  const dbKind = (e) => (e.cat === 'cardio' ? 'cardio' : /plank|hold|wall sit/i.test(e.en) ? 'time' : 'reps');
 
   function newExercise(day, data) {
     const kind = data.kind || 'reps';
@@ -622,22 +646,23 @@
     return ex;
   }
 
-  function dbPreview(day, e, parentApi) {
-    const key = 'db:' + e.id;
-    const muscles = window.GymMedia.fromDataset(e.primaryMuscles, e.secondaryMuscles);
+  function dbPreview(day, e) {
+    const key = e.img ? 'db:' + e.id : '';
+    const muscles = window.GymMedia.fromDataset(e.pm, e.sm);
     openSheet(`<div class="info">
       <div class="info-photo" data-anim="${esc(key)}" data-size="full"></div>
-      <div class="ex-group">${esc(dbGroup(e))}</div><h2 dir="ltr" class="en-title">${esc(e.name)}</h2>
-      <div class="ex-tags big"><span class="t">${esc(EQUIP_HE[e.equipment] || e.equipment || 'ללא ציוד')}</span>${e.level ? `<span class="t">${LEVEL_HE[e.level] || e.level}</span>` : ''}${e.mechanic ? `<span class="t">${e.mechanic === 'compound' ? 'מורכב' : 'מבודד'}</span>` : ''}</div>
+      <div class="ex-group">${esc(dbGroup(e))}</div><h2>${esc(e.he)}</h2><div class="en-sub" dir="ltr">${esc(e.en)}</div>
+      <div class="ex-tags big"><span class="t">${esc(dbEquip(e))}</span>${e.lv ? `<span class="t">${esc(LEVEL_HE[e.lv] || e.lv)}</span>` : ''}${e.mech ? `<span class="t">${e.mech === 'compound' ? 'תרגיל מורכב' : 'תרגיל מבודד'}</span>` : ''}</div>
       <h4>שרירים עובדים</h4>${window.GymMedia.muscleMap(muscles)}
-      ${(e.instructions || []).length ? `<h4>הוראות ביצוע</h4><ol class="tips en" dir="ltr">${e.instructions.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>` : ''}
+      ${(e.steps || []).length ? `<h4>הוראות ביצוע</h4><ol class="steps">${e.steps.map((t) => `<li dir="auto">${esc(t)}</li>`).join('')}</ol>` : ''}
       <button class="btn primary block big" data-add>${I.plus} הוסף ליום ${DAY_NAMES[day.dow]}</button>
     </div>`, (api) => {
-      $('[data-add]', api.el).onclick = () => {
-        const kind = e.category === 'cardio' ? 'cardio' : /plank|hold/i.test(e.name) ? 'time' : 'reps';
-        const ex = newExercise(day, { lib: 'db_' + e.id, name: e.name, group: dbGroup(e), anim: key, kind, muscles, tips: e.instructions || [] });
-        api.close(); if (parentApi) parentApi.close();
-        toast(`נוסף: ${esc(e.name)} – אפשר לשנות שם ויעדים`, { label: 'ערוך', run: () => exEdit(ex.id) });
+      const btn = $('[data-add]', api.el);
+      btn.onclick = () => {
+        if (btn.disabled) return; btn.disabled = true;
+        const ex = newExercise(day, { lib: 'db_' + e.id, dbId: e.id, name: e.he, group: dbGroup(e), anim: key, kind: dbKind(e), muscles, tips: e.steps || [] });
+        sheetStack.slice().forEach((sh) => sh.close());
+        toast(`נוסף: ${esc(e.he)}`, { label: 'ערוך', run: () => exEdit(ex.id) });
       };
     }, { tall: true });
   }
@@ -645,48 +670,58 @@
   function addExercise(dow) {
     const day = dayOf(dow);
     const libs = Object.entries(LIBRARY);
-    let tab = 'lib', q = '', g = '', limit = 40;
-    const libList = () => libs.filter(([, l]) => (!g || l.group === g) && (!q || l.name.includes(q))).map(([k, l]) =>
+    let tab = 'lib', q = '', g = '', limit = 40, seq = 0, busy = false;
+    const norm = (t) => String(t || '').toLowerCase().replace(/[׳'"״\-–]/g, '');
+    const libList = () => libs.filter(([, l]) => (!g || l.group === g) && (!q || norm(l.name).includes(norm(q)))).map(([k, l]) =>
       `<button class="lib-item" data-k="${k}"><div class="lib-anim" data-anim="${l.anim}"></div><div><b>${esc(l.name)}</b><span class="muted small">${esc(l.group)}</span></div>${I.plus}</button>`).join('') || '<p class="muted center">לא נמצאו תרגילים</p>';
     const dbList = (db) => {
-      const ql = q.toLowerCase();
-      const res = db.filter((e) => (!g || dbGroup(e) === g) && (!ql || e.name.toLowerCase().includes(ql) || (e.equipment || '').includes(ql)));
-      return `<p class="muted small">${res.length} תרגילים · מאגר פתוח עם תמונות הדגמה (באנגלית)</p>` + res.slice(0, limit).map((e) =>
-        `<button class="lib-item" data-db="${esc(e.id)}"><div class="lib-anim"><img src="${window.GymMedia.DB_BASE}${esc(e.id)}/0.jpg" loading="lazy" alt=""></div><div><b dir="ltr" class="en-title">${esc(e.name)}</b><span class="muted small">${esc(dbGroup(e))} · ${esc(EQUIP_HE[e.equipment] || e.equipment || 'ללא ציוד')}</span></div>${I.chev}</button>`).join('')
+      const nq = norm(q);
+      const res = db.filter((e) => (!g || dbGroup(e) === g) && (!nq || norm(e.he).includes(nq) || norm(e.en).includes(nq) || norm(dbEquip(e)).includes(nq)));
+      return `<p class="muted small">${res.length} תרגילים עם תמונות הדגמה, מפת שרירים והוראות ביצוע</p>` + res.slice(0, limit).map((e) =>
+        `<button class="lib-item" data-db="${esc(e.id)}"><div class="lib-anim">${e.img ? window.GymMedia.still('db:' + e.id) : window.GymMedia.player('')}</div><div><b>${esc(e.he)}</b><span class="muted small">${esc(dbGroup(e))} · ${esc(dbEquip(e))}</span></div>${I.chev}</button>`).join('')
         + (res.length > limit ? `<button class="btn ghost block" data-more>הצג עוד (${res.length - limit})</button>` : '');
     };
     openSheet(`<h2>הוספת תרגיל</h2>
-      <div class="seg" data-tabs><button class="on" data-t="lib">הספרייה שלי</button><button data-t="db">מאגר מלא · <bdi dir="ltr">800+</bdi></button></div>
-      <input class="search" placeholder="🔍 חיפוש תרגיל..." data-q>
+      <div class="seg" data-tabs><button class="on" data-t="lib">הספרייה שלי</button><button data-t="db">כל התרגילים · <bdi dir="ltr">870+</bdi></button></div>
+      <input class="search" type="search" enterkeyhint="search" placeholder="🔍 חיפוש תרגיל" data-q>
       <div class="chips" data-g><button class="chip on" data-v="">הכל</button>${GROUPS.map((x) => `<button class="chip" data-v="${x}">${x}</button>`).join('')}</div>
       <div class="lib-list"></div>`, (api) => {
       const listEl = $('.lib-list', api.el);
       const refresh = async () => {
+        const my = ++seq; // ignore results of stale refreshes (tab switched / new search while loading)
         if (tab === 'lib') {
-          listEl.innerHTML = `<button class="lib-item custom" data-k="__custom"><div class="lib-anim plus">${I.plus}</div><div><b>תרגיל מותאם אישית</b><span class="muted small">שם, תמונות ויעדים משלך</span></div></button>` + libList();
+          listEl.innerHTML = `<button class="lib-item custom" data-k="__custom"><div class="lib-anim plus">${I.plus}</div><div><b>תרגיל מותאם אישית</b><span class="muted small">שם, תמונה ויעדים משלך</span></div></button>` + libList();
         } else {
-          listEl.innerHTML = '<div class="loading"><i></i><span>טוען את המאגר...</span></div>';
-          try { const db = await loadDb(); if (tab === 'db') listEl.innerHTML = dbList(db); } catch (e) { listEl.innerHTML = '<div class="empty"><div>📡</div><h3>אין חיבור לאינטרנט</h3><p class="muted">המאגר המלא זמין כשיש רשת. הספרייה שלי עובדת גם בלי.</p></div>'; }
+          if (!dbPromise || !listEl.querySelector('[data-db]')) listEl.innerHTML = '<div class="loading"><i></i><span>טוען תרגילים...</span></div>';
+          let html;
+          try { html = dbList(await loadDb()); } catch (e) { html = '<div class="empty"><div>⚠️</div><h3>לא הצלחתי לטעון את רשימת התרגילים</h3><p class="muted">נסה שוב בעוד רגע.</p></div>'; }
+          if (my !== seq || tab !== 'db') return;
+          listEl.innerHTML = html;
         }
         fixBidi(listEl); mountAnims(listEl);
       };
-      $('[data-q]', api.el).placeholder = '🔍 חיפוש תרגיל...';
       $('[data-q]', api.el).oninput = (e) => { q = e.target.value.trim(); limit = 40; refresh(); };
       $('[data-g]', api.el).onclick = (e) => { const b = e.target.closest('.chip'); if (!b) return; $$('[data-g] .chip', api.el).forEach((c) => c.classList.toggle('on', c === b)); g = b.dataset.v; limit = 40; refresh(); };
       $('[data-tabs]', api.el).onclick = (e) => {
         const b = e.target.closest('[data-t]'); if (!b || b.dataset.t === tab) return;
         tab = b.dataset.t; $$('[data-tabs] button', api.el).forEach((x) => x.classList.toggle('on', x === b));
-        $('[data-q]', api.el).placeholder = tab === 'db' ? '🔍 חיפוש באנגלית: curl, press, squat...' : '🔍 חיפוש תרגיל...';
+        $('[data-q]', api.el).placeholder = tab === 'db' ? '🔍 חיפוש: לחיצה, כפיפה, סקוואט, curl' : '🔍 חיפוש תרגיל';
         limit = 40; refresh();
       };
       api.el.addEventListener('click', async (e) => {
+        if (busy || !sheetStack.includes(api)) return; // double taps: one action per tap
         if (e.target.closest('[data-more]')) { limit += 40; refresh(); return; }
         const dbItem = e.target.closest('[data-db]');
-        if (dbItem) { const db = await loadDb(); const ex = db.find((x) => x.id === dbItem.dataset.db); if (ex) dbPreview(day, ex, api); return; }
+        if (dbItem) {
+          busy = true;
+          try { const db = await loadDb(); const ex = db.find((x) => x.id === dbItem.dataset.db); if (ex) dbPreview(day, ex); } finally { setTimeout(() => { busy = false; }, 400); }
+          return;
+        }
         const it = e.target.closest('.lib-item[data-k]'); if (!it) return;
+        busy = true;
         const k = it.dataset.k;
         let ex;
-        if (k === '__custom') { const id = uid('e'); ex = newExercise(day, { id, lib: 'c_' + id, name: 'תרגיל חדש', group: g || 'חזה', anim: 'db_curl' }); }
+        if (k === '__custom') { const id = uid('e'); ex = newExercise(day, { id, lib: 'c_' + id, name: 'תרגיל חדש', group: g || 'חזה', anim: '' }); }
         else { const l = LIBRARY[k]; ex = newExercise(day, { lib: k, name: l.name, group: l.group, anim: l.anim, kind: l.kind || 'reps' }); }
         api.close();
         setTimeout(() => exEdit(ex.id, k === '__custom'), 250);
@@ -816,7 +851,7 @@
     // muscle heat map: primary muscles count a full set, secondary half a set
     const mLoad = {};
     const weekItems = S.history.filter((h) => new Date(h.date).getTime() >= s).flatMap((h) => h.items.map((it) => ({ it, n: it.sets.length })));
-    if (S.active) dayOf(S.active.dow).exercises.forEach((e) => { const n = (S.active.logs[e.id] || []).filter((x) => x.done).length; if (n) weekItems.push({ it: { lib: e.lib, exId: e.id, group: e.group }, n }); });
+    if (S.active) dayOf(S.active.dow).exercises.forEach((e) => { const n = (S.active.logs[e.id] || []).filter((x) => x.done).length; if (n) weekItems.push({ it: { lib: e.lib, exId: e.id, group: e.group, kind: e.kind }, n }); });
     weekItems.forEach(({ it, n }) => {
       if (it.kind === 'cardio') return;
       const ex = S.days.flatMap((d) => d.exercises).find((e) => e.id === it.exId || e.lib === it.lib) || { anim: (LIBRARY[it.lib] || {}).anim, group: it.group };
@@ -859,7 +894,7 @@
     const first = best[0].y, lastV = best[best.length - 1].y;
     const exAny = S.days.flatMap((d) => d.exercises).find((e) => e.lib === lib);
     const anim = exAny ? exAny.anim : (LIBRARY[lib] || {}).anim;
-    return `<div class="topbar"><a class="ib" href="#/progress">${I.back}</a><div class="tb-title">${esc(name)}</div><span></span></div>
+    return `<div class="topbar"><a class="ib" href="#/progress">${I.back}</a><div class="tb-title"><bdi>${esc(name)}</bdi></div><span></span></div>
       ${anim && window.GymMedia.has(anim) ? `<div class="prog-photo" data-anim="${esc(anim)}" data-size="full"></div>` : ''}
       <section class="stats3"><div class="stat"><b>${fmtNum(top)}</b><span>שיא ${reps ? '(ק״ג)' : ''}</span></div><div class="stat"><b>${lastV - first >= 0 ? '+' : ''}${fmtNum(lastV - first)}</b><span>שינוי מההתחלה</span></div><div class="stat"><b>${ss.length}</b><span>אימונים</span></div></section>
       <div class="card"><div class="card-h"><h3>${reps ? 'משקל מקסימלי לאימון' : 'שיא לאימון'}</h3></div>${lineChart(best.slice(-20), { unit: reps ? 'ק״ג' : (kind === 'time' ? 'שנ׳' : 'דק׳') })}</div>
@@ -917,7 +952,7 @@
       <button class="btn ghost block" data-act="check-update">${I.refresh} בדוק עדכונים</button>
       ${deferredInstall ? `<button class="btn primary block" data-act="install">התקן למסך הבית</button>` : ''}
       <details><summary>קרדיטים</summary><p>תמונות ההדגמה והמאגר המלא: free-exercise-db (Public Domain).<br>מפת השרירים: מבוססת על react-body-highlighter (MIT).</p></details>
-      <details><summary>איך מתקינים על הטלפון?</summary><p><b>אייפון:</b> פתח בספארי ← כפתור השיתוף ⬆️ ← "הוסף למסך הבית".<br><b>אנדרואיד:</b> פתח בכרום ← תפריט ⋮ ← "התקנת אפליקציה" / "הוסף למסך הבית".</p></details>
+      <details><summary>איך מתקינים על הטלפון?</summary><p><b>כרום:</b> תפריט ⋮ ← "התקנת אפליקציה" או "הוספה למסך הבית".<br><b>סמסונג אינטרנט:</b> תפריט ☰ ← "הוסף דף אל" ← "מסך הבית".</p></details>
     </div>
 
     <button class="btn danger-ghost block" data-act="wipe">${I.trash} מחק את כל הנתונים</button>
@@ -1080,8 +1115,9 @@
   let deferredInstall = null;
   window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredInstall = e; if (['home', 'settings'].includes(route().a)) render(); });
   let swReg = null;
+  let updateRequested = false;
   function showUpdate(worker) {
-    toast('🎉 גרסה חדשה זמינה', { label: 'עדכן עכשיו', run: () => worker.postMessage('skipWaiting') });
+    toast('🎉 גרסה חדשה זמינה', { label: 'עדכן עכשיו', run: () => { updateRequested = true; worker.postMessage('skipWaiting'); } });
   }
   async function checkUpdate(manual) {
     if (!swReg) { if (manual) toast('עדכונים זמינים רק באפליקציה המותקנת'); return; }
@@ -1102,7 +1138,7 @@
       setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
     }).catch(() => {});
     let reloading = false;
-    navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloading) { reloading = true; location.reload(); } });
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (updateRequested && !reloading) { reloading = true; location.reload(); } });
   }
 
   // ---------------- boot ----------------

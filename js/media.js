@@ -1,10 +1,12 @@
 /* ICON GYM — exercise media: looping demo photos + muscle map.
  * Photos: free-exercise-db (public domain / Unlicense), two frames per exercise (start → end).
- * Local library photos live in img/ex/<key>/{0,1}.jpg; exercises added from the online
- * database use the key "db:<datasetId>" and load from GitHub (cached by the service worker).
+ * Local library photos live in img/ex/<key>/{0,1}.jpg; exercises added from the full database
+ * use the key "db:<datasetId>" and load from GitHub, pinned to one dataset commit
+ * (CORS requests, cached by the service worker).
  */
 (function () {
-  const DB_BASE = 'https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/';
+  const DB_BASE = 'https://raw.githubusercontent.com/yuhonas/free-exercise-db/f00c92c7dcf1216a928a52c3706c7ce8e2f71ed5/exercises/';
+  const SAFE_ID = /^[A-Za-z0-9_-]+$/;
   const PHOTOS = window.GymPhotos || {};
   const MAP = window.GymMuscleMap || { front: [], back: [] };
 
@@ -29,28 +31,43 @@
 
   const isDb = (key) => typeof key === 'string' && key.startsWith('db:');
   function frames(key) {
-    if (isDb(key)) { const id = key.slice(3); return [DB_BASE + id + '/0.jpg', DB_BASE + id + '/1.jpg']; }
+    if (isDb(key)) { const id = key.slice(3); return SAFE_ID.test(id) ? [DB_BASE + id + '/0.jpg', DB_BASE + id + '/1.jpg'] : null; }
     if (PHOTOS[key]) return [`img/ex/${key}/0.jpg`, `img/ex/${key}/1.jpg`];
     return null;
   }
   const has = (key) => !!frames(key);
-  const focus = (key) => { const p = PHOTOS[key]; return p ? [p.fx, p.fy] : [50, 50]; };
+  // hero (tall card slice) can use its own focus point (hx/hy) so the athlete's head stays in view
+  const focus = (key, size) => { const p = PHOTOS[key]; if (!p) return [50, 50]; return size === 'hero' && p.hx != null ? [p.hx, p.hy != null ? p.hy : p.fy] : [p.fx, p.fy]; };
 
-  /* Looping two-frame player. size: 'thumb' (zoomed on the athlete) | 'full' (whole frame + position labels) */
+  const EMPTY = `<div class="ph ph-empty"><svg viewBox="0 0 24 24"><path d="M6.5 6.5v11M17.5 6.5v11M3 9.5v5M21 9.5v5M6.5 12h11"/></svg></div>`;
+
+  /* Looping two-frame player. size: 'thumb' (zoomed on the athlete) | 'hero' | 'full' (whole frame + position labels).
+   * The labels sit outside the zoomed .ph and only start animating once the photos load (.ph.ok + .ph-steps),
+   * so they always stay in step with the photo swap. */
   function player(key, size = 'thumb') {
     const f = frames(key);
-    if (!f) return `<div class="ph ph-empty"><svg viewBox="0 0 24 24"><path d="M6.5 6.5v11M17.5 6.5v11M3 9.5v5M21 9.5v5M6.5 12h11"/></svg></div>`;
-    const [fx, fy] = focus(key);
+    if (!f) return EMPTY;
+    const [fx, fy] = focus(key, size);
     const lazy = size === 'thumb' ? ' loading="lazy"' : '';
+    const cors = isDb(key) ? ' crossorigin="anonymous"' : '';
     return `<div class="ph ph-${size}" style="--fx:${fx}%;--fy:${fy}%">
-      <img class="a" src="${f[0]}" alt=""${lazy} decoding="async" onload="this.parentNode.classList.add('ok')" onerror="this.parentNode.classList.add('err')">
-      <img class="b" src="${f[1]}" alt=""${lazy} decoding="async">
-      ${size === 'full' ? '<div class="ph-steps"><span class="s1">תנוחת התחלה</span><span class="s2">תנוחת סיום</span></div>' : ''}
-    </div>`;
+      <img class="a" src="${f[0]}" alt=""${lazy}${cors} decoding="async" onload="this.parentNode.classList.add('ok')" onerror="this.parentNode.classList.add('err')">
+      <img class="b" src="${f[1]}" alt=""${lazy}${cors} decoding="async">
+    </div>${size === 'full' ? '<div class="ph-steps"><span class="s1">תנוחת התחלה</span><span class="s2">תנוחת סיום</span></div>' : ''}`;
+  }
+
+  /* Single still frame, for long lists (one request per row instead of two). */
+  function still(key) {
+    const f = frames(key);
+    if (!f) return EMPTY;
+    const [fx, fy] = focus(key);
+    return `<div class="ph ph-thumb" style="--fx:${fx}%;--fy:${fy}%"><img class="a" src="${f[0]}" alt="" loading="lazy"${isDb(key) ? ' crossorigin="anonymous"' : ''} decoding="async" onload="this.parentNode.classList.add('ok')" onerror="this.parentNode.classList.add('err')"></div>`;
   }
 
   function musclesOf(ex) {
     if (ex && ex.muscles && (ex.muscles.p || []).length) return ex.muscles;
+    // custom exercises: the user picked the muscle group; a borrowed demo photo says nothing about the muscles
+    if (ex && String(ex.lib || '').startsWith('c_')) return { p: GROUP_MUSCLES[ex.group] || [], s: [] };
     const p = ex && PHOTOS[ex.anim];
     if (p && p.p && p.p.length) return { p: p.p, s: p.s || [] };
     return { p: GROUP_MUSCLES[ex && ex.group] || [], s: [] };
@@ -73,5 +90,5 @@
 
   function mount(container, key, size) { container.innerHTML = player(key, size || container.dataset.size || 'thumb'); }
 
-  window.GymMedia = { player, mount, has, frames, musclesOf, fromDataset, muscleMap, keys: Object.keys(PHOTOS), DB_BASE, MUSCLE_HE };
+  window.GymMedia = { player, still, mount, has, frames, SAFE_ID, musclesOf, fromDataset, muscleMap, keys: Object.keys(PHOTOS), DB_BASE, MUSCLE_HE };
 })();
