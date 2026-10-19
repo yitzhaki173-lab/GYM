@@ -1,7 +1,7 @@
 /* ICON GYM — main app */
 (function () {
   'use strict';
-  const APP_VERSION = '1.2.0';
+  const APP_VERSION = '1.2.1';
   const { PROGRAM_VERSION, GROUPS, LIBRARY, defaultDays } = window.GymProgram;
   const DAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
   const DAY_SHORT = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];

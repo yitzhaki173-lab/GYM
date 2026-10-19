@@ -2,7 +2,7 @@
  * Bump VERSION on every release (together with APP_VERSION in js/app.js):
  * installed apps detect the change and show "גרסה חדשה זמינה".
  */
-const VERSION = '1.2.0';
+const VERSION = '1.2.1';
 const CACHE = 'icongym-' + VERSION;
 const FONT_CACHE = 'icongym-fonts';
 const DB_CACHE = 'icongym-photos-v2'; // demo photos of exercises from the full database
