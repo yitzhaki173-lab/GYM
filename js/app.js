@@ -1,7 +1,7 @@
 /* ICON GYM — main app */
 (function () {
   'use strict';
-  const APP_VERSION = '1.0.0';
+  const APP_VERSION = '1.1.0';
   const { PROGRAM_VERSION, GROUPS, LIBRARY, defaultDays } = window.GymProgram;
   const DAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
   const DAY_SHORT = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
@@ -132,7 +132,7 @@
   }
 
   function mountAnims(root) {
-    $$('[data-anim]', root).forEach((n) => { if (!n.firstChild) window.GymAnim.mount(n, n.dataset.anim); });
+    $$('[data-anim]', root).forEach((n) => { if (!n.firstElementChild) window.GymMedia.mount(n, n.dataset.anim, n.dataset.size); });
   }
 
   // ---------------- icons ----------------
@@ -192,7 +192,7 @@
     renderActiveChip();
   }
 
-  window.addEventListener('hashchange', () => { editMode = false; render(); window.scrollTo(0, 0); });
+  window.addEventListener('hashchange', () => { sheetStack.slice().forEach((sh) => sh.close()); editMode = false; render(); window.scrollTo(0, 0); });
 
   // ---------------- HOME ----------------
   function greeting() {
@@ -248,7 +248,7 @@
       <div class="tc-title">${esc(today.title)}</div>
       <div class="tc-meta">${dayMeta(today)}</div>
       ${today.type !== 'rest' ? `<div class="tc-cta">${today.type === 'cardio' ? 'פתח' : 'התחל אימון'} ${I.chev}</div>` : '<div class="tc-cta soft">זמן לטעון את הסוללות 🔋</div>'}
-      <div class="tc-anim" data-anim="${today.type === 'rest' ? 'plank' : (today.exercises[0] || {}).anim || 'run'}"></div>
+      ${today.type !== 'rest' && today.exercises[0] ? `<div class="tc-photo" data-anim="${esc(today.exercises[0].anim)}" data-size="hero"></div>` : ''}
     </a>`}
 
     <section class="stats3">
@@ -536,11 +536,12 @@
     const ss = sessionsFor(ex.lib).slice(0, 6);
     const pts = sessionsFor(ex.lib).slice(0, 12).reverse().map(({ h, it }) => ({ x: fmtShort(h.date), y: ex.kind === 'reps' ? bestOf(it).w : Math.max(...it.sets.map((s) => num(s.r))) }));
     openSheet(`<div class="info">
-      <div class="info-anim" data-anim="${esc(ex.anim)}"></div>
+      <div class="info-photo" data-anim="${esc(ex.anim)}" data-size="full"></div>
       <div class="ex-group">${esc(ex.group)}</div><h2>${esc(ex.name)}</h2>
       <div class="ex-tags big"><span class="t">${ex.sets} סטים</span><span class="t">${esc(ex.reps)} ${ex.kind === 'reps' ? 'חזרות' : unitLabel(ex)}</span>${ex.weight ? `<span class="t">${esc(ex.weight)} ${esc(ex.unit)}</span>` : ''}${ex.rest ? `<span class="t">${I.timer} ${ex.rest} שנ׳ מנוחה</span>` : ''}</div>
       ${ex.note ? `<div class="day-note">${I.info}<span>${esc(ex.note)}</span></div>` : ''}
-      ${(lib.tips || []).length ? `<h4>דגשים לביצוע</h4><ul class="tips">${lib.tips.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
+      <h4>שרירים עובדים</h4>${window.GymMedia.muscleMap(window.GymMedia.musclesOf(ex))}
+      ${(lib.tips || ex.tips || []).length ? `<h4>דגשים לביצוע</h4><ul class="tips" ${lib.tips ? '' : 'dir="ltr"'}>${(lib.tips || ex.tips).map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
       <h4>ההתקדמות שלך</h4>
       ${pts.length > 1 ? lineChart(pts, { unit: unitLabel(ex) }) : ''}
       ${ss.length ? `<div class="hist-mini">${ss.map(({ h, it }) => `<div class="hm"><span>${fmtShort(h.date)}</span><span>${it.sets.map((s) => ex.kind === 'reps' ? `${s.w || 0}×${s.r}` : s.r).join(' · ')}</span></div>`).join('')}</div>` : '<p class="muted small">עוד אין רישומים לתרגיל הזה. אחרי האימון הראשון תראה כאן את ההתקדמות.</p>'}
@@ -550,17 +551,18 @@
 
   function exEdit(id, isNew) {
     const { day, ex } = findEx(id); if (!ex) return;
-    const animOpts = window.GymAnim.keys.map((k) => { const l = Object.values(LIBRARY).find((x) => x.anim === k); return `<option value="${k}" ${k === ex.anim ? 'selected' : ''}>${esc(l ? l.name : k)}</option>`; }).join('');
+    const animOpts = (String(ex.anim).startsWith('db:') ? `<option value="${esc(ex.anim)}" selected>מהמאגר: ${esc(ex.anim.slice(3).replace(/_/g, ' '))}</option>` : '')
+      + window.GymMedia.keys.map((k) => { const l = Object.values(LIBRARY).find((x) => x.anim === k); return `<option value="${k}" ${k === ex.anim ? 'selected' : ''}>${esc(l ? l.name : k)}</option>`; }).join('');
     const rests = [0, 30, 45, 60, 75, 90, 120, 150, 180, 240];
     openSheet(`<form class="form" autocomplete="off">
       <h2>${isNew ? 'תרגיל חדש' : 'עריכת תרגיל'}</h2>
-      <div class="edit-preview" data-anim="${esc(ex.anim)}"></div>
+      <div class="edit-preview" data-anim="${esc(ex.anim)}" data-size="full"></div>
       <label>שם התרגיל<input name="name" value="${esc(ex.name)}" required></label>
       <div class="grid2">
         <label>קבוצת שריר<select name="group">${GROUPS.map((g) => `<option ${g === ex.group ? 'selected' : ''}>${g}</option>`).join('')}</select></label>
         <label>סוג מעקב<select name="kind"><option value="reps" ${ex.kind === 'reps' ? 'selected' : ''}>משקל × חזרות</option><option value="time" ${ex.kind === 'time' ? 'selected' : ''}>זמן (שניות)</option><option value="cardio" ${ex.kind === 'cardio' ? 'selected' : ''}>אירובי (דקות)</option></select></label>
       </div>
-      <label>הנפשה<select name="anim">${animOpts}</select></label>
+      <label>תמונות הדגמה<select name="anim">${animOpts}</select></label>
       <div class="grid3">
         <label>סטים<div class="stepper"><button type="button" data-step="-1">−</button><input name="sets" inputmode="numeric" value="${esc(ex.sets)}"><button type="button" data-step="1">+</button></div></label>
         <label>חזרות / יעד<input name="reps" dir="ltr" value="${esc(ex.reps)}" placeholder="8–12"></label>
@@ -575,10 +577,11 @@
       ${isNew ? '' : `<button class="btn danger-ghost block" type="button" data-del>${I.trash} מחק תרגיל מהיום</button>`}
     </form>`, (api) => {
       const f = $('form', api.el);
-      f.anim.onchange = () => { const p = $('.edit-preview', api.el); p.innerHTML = ''; window.GymAnim.mount(p, f.anim.value); };
+      f.anim.onchange = () => window.GymMedia.mount($('.edit-preview', api.el), f.anim.value, 'full');
       $$('[data-step]', api.el).forEach((b) => b.onclick = () => { f.sets.value = Math.max(1, Math.min(10, (+f.sets.value || 0) + +b.dataset.step)); });
       f.onsubmit = (e) => {
         e.preventDefault();
+        if (f.anim.value !== ex.anim && !String(f.anim.value).startsWith('db:')) { delete ex.muscles; delete ex.tips; }
         Object.assign(ex, { name: f.name.value.trim() || ex.name, group: f.group.value, kind: f.kind.value, anim: f.anim.value, sets: Math.max(1, +f.sets.value || 1), reps: f.reps.value.trim(), rest: +f.rest.value, weight: f.weight.value.trim(), unit: f.unit.value.trim(), note: f.note.value.trim() });
         if (S.active && S.active.dow === day.dow) { const l = ensureLog(ex); while (l.length < ex.sets) l.push({ w: '', r: '', done: false }); while (l.length > ex.sets && !l[l.length - 1].done) l.pop(); }
         save(); api.close(); render(); toast('נשמר ✓');
@@ -597,31 +600,98 @@
     save(); render();
   }
 
+  // ---------------- online exercise database (free-exercise-db, 800+ exercises) ----------------
+  const DB_URL = 'https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/dist/exercises.json';
+  let dbPromise = null;
+  const CAT_ORDER = { strength: 0, powerlifting: 1, 'olympic weightlifting': 2, strongman: 3, plyometrics: 4, cardio: 5, stretching: 6 };
+  const loadDb = () => (dbPromise = dbPromise || fetch(DB_URL).then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then((db) => db.sort((a, b) => (CAT_ORDER[a.category] ?? 9) - (CAT_ORDER[b.category] ?? 9) || a.name.localeCompare(b.name)))
+    .catch((e) => { dbPromise = null; throw e; }));
+  const DB_GROUP = { chest: 'חזה', lats: 'גב', 'middle back': 'גב', 'lower back': 'גב', traps: 'גב', shoulders: 'כתפיים', neck: 'כתפיים', biceps: 'יד קדמית', forearms: 'יד קדמית', triceps: 'יד אחורית', quadriceps: 'רגליים', hamstrings: 'רגליים', glutes: 'רגליים', calves: 'רגליים', adductors: 'רגליים', abductors: 'רגליים', abdominals: 'בטן' };
+  const EQUIP_HE = { barbell: 'מוט', dumbbell: 'דאמבלים', cable: 'כבל', machine: 'מכונה', 'body only': 'משקל גוף', 'e-z curl bar': 'מוט W', kettlebells: 'קטלבל', bands: 'גומיות', 'exercise ball': 'כדור פיזיו', 'medicine ball': 'כדור כוח', 'foam roll': 'גליל', other: 'אחר' };
+  const LEVEL_HE = { beginner: 'מתחיל', intermediate: 'בינוני', expert: 'מתקדם' };
+  const dbGroup = (e) => (e.category === 'cardio' ? 'אירובי' : DB_GROUP[(e.primaryMuscles || [])[0]] || 'חזה');
+
+  function newExercise(day, data) {
+    const kind = data.kind || 'reps';
+    const ex = Object.assign({ id: uid('e'), sets: kind === 'cardio' ? 1 : kind === 'time' ? 2 : 3, reps: kind === 'cardio' ? '45' : kind === 'time' ? '30–45' : '8–12', weight: '', unit: kind === 'reps' ? 'ק״ג' : '', rest: kind === 'cardio' ? 0 : 90, note: '', kind }, data);
+    day.exercises.push(ex);
+    if (day.type === 'rest') { day.type = 'strength'; if (day.color === 'gray') day.color = 'purple'; }
+    save(); render();
+    setTimeout(() => { const n = $('#ex-' + ex.id); if (n) { n.classList.add('flash'); n.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }, 250);
+    return ex;
+  }
+
+  function dbPreview(day, e, parentApi) {
+    const key = 'db:' + e.id;
+    const muscles = window.GymMedia.fromDataset(e.primaryMuscles, e.secondaryMuscles);
+    openSheet(`<div class="info">
+      <div class="info-photo" data-anim="${esc(key)}" data-size="full"></div>
+      <div class="ex-group">${esc(dbGroup(e))}</div><h2 dir="ltr" class="en-title">${esc(e.name)}</h2>
+      <div class="ex-tags big"><span class="t">${esc(EQUIP_HE[e.equipment] || e.equipment || 'ללא ציוד')}</span>${e.level ? `<span class="t">${LEVEL_HE[e.level] || e.level}</span>` : ''}${e.mechanic ? `<span class="t">${e.mechanic === 'compound' ? 'מורכב' : 'מבודד'}</span>` : ''}</div>
+      <h4>שרירים עובדים</h4>${window.GymMedia.muscleMap(muscles)}
+      ${(e.instructions || []).length ? `<h4>הוראות ביצוע</h4><ol class="tips en" dir="ltr">${e.instructions.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>` : ''}
+      <button class="btn primary block big" data-add>${I.plus} הוסף ליום ${DAY_NAMES[day.dow]}</button>
+    </div>`, (api) => {
+      $('[data-add]', api.el).onclick = () => {
+        const kind = e.category === 'cardio' ? 'cardio' : /plank|hold/i.test(e.name) ? 'time' : 'reps';
+        const ex = newExercise(day, { lib: 'db_' + e.id, name: e.name, group: dbGroup(e), anim: key, kind, muscles, tips: e.instructions || [] });
+        api.close(); if (parentApi) parentApi.close();
+        toast(`נוסף: ${esc(e.name)} – אפשר לשנות שם ויעדים`, { label: 'ערוך', run: () => exEdit(ex.id) });
+      };
+    }, { tall: true });
+  }
+
   function addExercise(dow) {
     const day = dayOf(dow);
     const libs = Object.entries(LIBRARY);
-    const list = (q, g) => libs.filter(([, l]) => (!g || l.group === g) && (!q || l.name.includes(q))).map(([k, l]) =>
+    let tab = 'lib', q = '', g = '', limit = 40;
+    const libList = () => libs.filter(([, l]) => (!g || l.group === g) && (!q || l.name.includes(q))).map(([k, l]) =>
       `<button class="lib-item" data-k="${k}"><div class="lib-anim" data-anim="${l.anim}"></div><div><b>${esc(l.name)}</b><span class="muted small">${esc(l.group)}</span></div>${I.plus}</button>`).join('') || '<p class="muted center">לא נמצאו תרגילים</p>';
+    const dbList = (db) => {
+      const ql = q.toLowerCase();
+      const res = db.filter((e) => (!g || dbGroup(e) === g) && (!ql || e.name.toLowerCase().includes(ql) || (e.equipment || '').includes(ql)));
+      return `<p class="muted small">${res.length} תרגילים · מאגר פתוח עם תמונות הדגמה (באנגלית)</p>` + res.slice(0, limit).map((e) =>
+        `<button class="lib-item" data-db="${esc(e.id)}"><div class="lib-anim"><img src="${window.GymMedia.DB_BASE}${esc(e.id)}/0.jpg" loading="lazy" alt=""></div><div><b dir="ltr" class="en-title">${esc(e.name)}</b><span class="muted small">${esc(dbGroup(e))} · ${esc(EQUIP_HE[e.equipment] || e.equipment || 'ללא ציוד')}</span></div>${I.chev}</button>`).join('')
+        + (res.length > limit ? `<button class="btn ghost block" data-more>הצג עוד (${res.length - limit})</button>` : '');
+    };
     openSheet(`<h2>הוספת תרגיל</h2>
+      <div class="seg" data-tabs><button class="on" data-t="lib">הספרייה שלי</button><button data-t="db">מאגר מלא · <bdi dir="ltr">800+</bdi></button></div>
       <input class="search" placeholder="🔍 חיפוש תרגיל..." data-q>
-      <div class="chips" data-g><button class="chip on" data-v="">הכל</button>${GROUPS.map((g) => `<button class="chip" data-v="${g}">${g}</button>`).join('')}</div>
-      <button class="lib-item custom" data-k="__custom"><div class="lib-anim plus">${I.plus}</div><div><b>תרגיל מותאם אישית</b><span class="muted small">שם, הנפשה ויעדים משלך</span></div></button>
-      <div class="lib-list">${list('', '')}</div>`, (api) => {
-      let q = '', g = '';
-      const refresh = () => { $('.lib-list', api.el).innerHTML = list(q, g); fixBidi(api.el); mountAnims(api.el); };
-      $('[data-q]', api.el).oninput = (e) => { q = e.target.value.trim(); refresh(); };
-      $('[data-g]', api.el).onclick = (e) => { const b = e.target.closest('.chip'); if (!b) return; $$('.chip', api.el).forEach((c) => c.classList.toggle('on', c === b)); g = b.dataset.v; refresh(); };
-      api.el.addEventListener('click', (e) => {
-        const it = e.target.closest('.lib-item'); if (!it) return;
-        const k = it.dataset.k; const id = uid('e');
+      <div class="chips" data-g><button class="chip on" data-v="">הכל</button>${GROUPS.map((x) => `<button class="chip" data-v="${x}">${x}</button>`).join('')}</div>
+      <div class="lib-list"></div>`, (api) => {
+      const listEl = $('.lib-list', api.el);
+      const refresh = async () => {
+        if (tab === 'lib') {
+          listEl.innerHTML = `<button class="lib-item custom" data-k="__custom"><div class="lib-anim plus">${I.plus}</div><div><b>תרגיל מותאם אישית</b><span class="muted small">שם, תמונות ויעדים משלך</span></div></button>` + libList();
+        } else {
+          listEl.innerHTML = '<div class="loading"><i></i><span>טוען את המאגר...</span></div>';
+          try { const db = await loadDb(); if (tab === 'db') listEl.innerHTML = dbList(db); } catch (e) { listEl.innerHTML = '<div class="empty"><div>📡</div><h3>אין חיבור לאינטרנט</h3><p class="muted">המאגר המלא זמין כשיש רשת. הספרייה שלי עובדת גם בלי.</p></div>'; }
+        }
+        fixBidi(listEl); mountAnims(listEl);
+      };
+      $('[data-q]', api.el).placeholder = '🔍 חיפוש תרגיל...';
+      $('[data-q]', api.el).oninput = (e) => { q = e.target.value.trim(); limit = 40; refresh(); };
+      $('[data-g]', api.el).onclick = (e) => { const b = e.target.closest('.chip'); if (!b) return; $$('[data-g] .chip', api.el).forEach((c) => c.classList.toggle('on', c === b)); g = b.dataset.v; limit = 40; refresh(); };
+      $('[data-tabs]', api.el).onclick = (e) => {
+        const b = e.target.closest('[data-t]'); if (!b || b.dataset.t === tab) return;
+        tab = b.dataset.t; $$('[data-tabs] button', api.el).forEach((x) => x.classList.toggle('on', x === b));
+        $('[data-q]', api.el).placeholder = tab === 'db' ? '🔍 חיפוש באנגלית: curl, press, squat...' : '🔍 חיפוש תרגיל...';
+        limit = 40; refresh();
+      };
+      api.el.addEventListener('click', async (e) => {
+        if (e.target.closest('[data-more]')) { limit += 40; refresh(); return; }
+        const dbItem = e.target.closest('[data-db]');
+        if (dbItem) { const db = await loadDb(); const ex = db.find((x) => x.id === dbItem.dataset.db); if (ex) dbPreview(day, ex, api); return; }
+        const it = e.target.closest('.lib-item[data-k]'); if (!it) return;
+        const k = it.dataset.k;
         let ex;
-        if (k === '__custom') ex = { id, lib: 'c_' + id, name: 'תרגיל חדש', group: g || 'חזה', anim: 'db_curl', kind: 'reps', sets: 3, reps: '8–12', weight: '', unit: 'ק״ג', rest: 90, note: '' };
-        else { const l = LIBRARY[k]; const kind = l.kind || 'reps'; ex = { id, lib: k, name: l.name, group: l.group, anim: l.anim, kind, sets: kind === 'cardio' ? 1 : kind === 'time' ? 2 : 3, reps: kind === 'cardio' ? '45' : kind === 'time' ? '30–45' : '8–12', weight: '', unit: kind === 'reps' ? 'ק״ג' : '', rest: kind === 'cardio' ? 0 : 90, note: '' }; }
-        day.exercises.push(ex);
-        if (day.type === 'rest') { day.type = 'strength'; if (day.color === 'gray') day.color = 'purple'; }
-        save(); api.close(); render();
-        setTimeout(() => { exEdit(id, k === '__custom'); const n = $('#ex-' + id); if (n) n.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 250);
+        if (k === '__custom') { const id = uid('e'); ex = newExercise(day, { id, lib: 'c_' + id, name: 'תרגיל חדש', group: g || 'חזה', anim: 'db_curl' }); }
+        else { const l = LIBRARY[k]; ex = newExercise(day, { lib: k, name: l.name, group: l.group, anim: l.anim, kind: l.kind || 'reps' }); }
+        api.close();
+        setTimeout(() => exEdit(ex.id, k === '__custom'), 250);
       });
+      refresh();
     }, { tall: true });
   }
 
@@ -743,7 +813,21 @@
     const delta = lastBW && firstBW ? lastBW.kg - firstBW.kg : 0;
     const bmi = lastBW ? lastBW.kg / Math.pow(S.body.height / 100, 2) : 0;
 
+    // muscle heat map: primary muscles count a full set, secondary half a set
+    const mLoad = {};
+    const weekItems = S.history.filter((h) => new Date(h.date).getTime() >= s).flatMap((h) => h.items.map((it) => ({ it, n: it.sets.length })));
+    if (S.active) dayOf(S.active.dow).exercises.forEach((e) => { const n = (S.active.logs[e.id] || []).filter((x) => x.done).length; if (n) weekItems.push({ it: { lib: e.lib, exId: e.id, group: e.group }, n }); });
+    weekItems.forEach(({ it, n }) => {
+      if (it.kind === 'cardio') return;
+      const ex = S.days.flatMap((d) => d.exercises).find((e) => e.id === it.exId || e.lib === it.lib) || { anim: (LIBRARY[it.lib] || {}).anim, group: it.group };
+      const m = window.GymMedia.musclesOf(ex);
+      m.p.forEach((x) => { mLoad[x] = (mLoad[x] || 0) + n; });
+      m.s.forEach((x) => { mLoad[x] = (mLoad[x] || 0) + n / 2; });
+    });
+    const heavy = Object.keys(mLoad).filter((k) => mLoad[k] >= 6), light = Object.keys(mLoad).filter((k) => mLoad[k] > 0 && mLoad[k] < 6);
     return `<div class="page-h"><h1>התקדמות</h1></div>
+    <div class="card"><div class="card-h"><h3>🔥 מפת שרירים – השבוע</h3><span class="muted small">לפי סטים שבוצעו</span></div>
+      ${window.GymMedia.muscleMap({ p: heavy, s: light }, { labels: ['עבודה מלאה (6+ סטים)', 'עבודה חלקית'], empty: 'עוד לא בוצעו סטים השבוע – כל שריר שתאמן יידלק כאן' })}</div>
     <div class="card"><div class="card-h"><h3>🎯 סטים השבוע לפי שריר</h3><span class="muted small">בוצע / מתוכנן</span></div>
       <div class="bars">${groups.map((g) => { const dn = doneG[g] || 0, pl = planG[g]; return `<div class="bar-row"><span class="bl">${g}</span><div class="bt"><i style="width:${Math.min(100, (dn / pl) * 100)}%" class="${dn >= pl ? 'full' : ''}"></i></div><span class="bv">${dn}/${pl}</span></div>`; }).join('')}</div></div>
 
@@ -773,9 +857,10 @@
     const vol = reps ? ss.map(({ h, it }) => ({ x: fmtShort(h.date), y: volOf(it) })) : [];
     const top = Math.max(...best.map((p) => p.y));
     const first = best[0].y, lastV = best[best.length - 1].y;
-    const libDef = LIBRARY[lib];
+    const exAny = S.days.flatMap((d) => d.exercises).find((e) => e.lib === lib);
+    const anim = exAny ? exAny.anim : (LIBRARY[lib] || {}).anim;
     return `<div class="topbar"><a class="ib" href="#/progress">${I.back}</a><div class="tb-title">${esc(name)}</div><span></span></div>
-      ${libDef ? `<div class="prog-anim" data-anim="${libDef.anim}"></div>` : ''}
+      ${anim && window.GymMedia.has(anim) ? `<div class="prog-photo" data-anim="${esc(anim)}" data-size="full"></div>` : ''}
       <section class="stats3"><div class="stat"><b>${fmtNum(top)}</b><span>שיא ${reps ? '(ק״ג)' : ''}</span></div><div class="stat"><b>${lastV - first >= 0 ? '+' : ''}${fmtNum(lastV - first)}</b><span>שינוי מההתחלה</span></div><div class="stat"><b>${ss.length}</b><span>אימונים</span></div></section>
       <div class="card"><div class="card-h"><h3>${reps ? 'משקל מקסימלי לאימון' : 'שיא לאימון'}</h3></div>${lineChart(best.slice(-20), { unit: reps ? 'ק״ג' : (kind === 'time' ? 'שנ׳' : 'דק׳') })}</div>
       ${reps ? `<div class="card"><div class="card-h"><h3>1RM משוער</h3><span class="muted small">נוסחת Epley</span></div>${lineChart(orm.slice(-20), { unit: 'ק״ג' })}</div>
@@ -831,6 +916,7 @@
     <div class="card"><div class="card-h"><h3>📲 האפליקציה</h3><span class="pill">גרסה ${APP_VERSION}</span></div>
       <button class="btn ghost block" data-act="check-update">${I.refresh} בדוק עדכונים</button>
       ${deferredInstall ? `<button class="btn primary block" data-act="install">התקן למסך הבית</button>` : ''}
+      <details><summary>קרדיטים</summary><p>תמונות ההדגמה והמאגר המלא: free-exercise-db (Public Domain).<br>מפת השרירים: מבוססת על react-body-highlighter (MIT).</p></details>
       <details><summary>איך מתקינים על הטלפון?</summary><p><b>אייפון:</b> פתח בספארי ← כפתור השיתוף ⬆️ ← "הוסף למסך הבית".<br><b>אנדרואיד:</b> פתח בכרום ← תפריט ⋮ ← "התקנת אפליקציה" / "הוסף למסך הבית".</p></details>
     </div>
 
